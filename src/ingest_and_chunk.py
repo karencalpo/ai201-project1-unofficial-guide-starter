@@ -260,6 +260,51 @@ def write_jsonl(records: list[dict[str, Any]], output_path: Path) -> None:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
+def select_representative_chunks(
+    chunks: list[dict[str, Any]], sample_count: int
+) -> list[dict[str, Any]]:
+    if sample_count <= 0 or not chunks:
+        return []
+    if sample_count >= len(chunks):
+        return chunks
+
+    # Evenly spread samples across the full chunk list.
+    if sample_count == 1:
+        indices = [0]
+    else:
+        indices = [round(i * (len(chunks) - 1) / (sample_count - 1)) for i in range(sample_count)]
+
+    seen: set[int] = set()
+    selected: list[dict[str, Any]] = []
+    for idx in indices:
+        if idx in seen:
+            continue
+        seen.add(idx)
+        selected.append(chunks[idx])
+    return selected
+
+
+def print_representative_chunks(
+    chunks: list[dict[str, Any]], sample_count: int, preview_chars: int
+) -> None:
+    selected = select_representative_chunks(chunks, sample_count)
+    if not selected:
+        print("No chunks available to sample.")
+        return
+
+    print(f"\nRepresentative chunk samples ({len(selected)}):")
+    for i, chunk in enumerate(selected, start=1):
+        text = chunk["text"]
+        preview = text[:preview_chars]
+        if len(text) > preview_chars:
+            preview += "..."
+
+        print(f"\n[{i}] {chunk['course']} | {chunk['doc_id']} | chunk_id={chunk['chunk_id']}")
+        print(f"source_url: {chunk['source_url']}")
+        print(f"char_span: {chunk['start_char']}..{chunk['end_char']}")
+        print(f"text_preview: {preview}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Ingest OMSCentral course pages and create fixed-size chunks for RAG."
@@ -286,6 +331,18 @@ def main() -> None:
         default=50,
         help="Overlap size in characters.",
     )
+    parser.add_argument(
+        "--debug-sample-count",
+        type=int,
+        default=0,
+        help="Print this many representative chunks for inspection. Set 0 to disable.",
+    )
+    parser.add_argument(
+        "--debug-preview-chars",
+        type=int,
+        default=240,
+        help="Maximum characters to print per sampled chunk preview.",
+    )
     args = parser.parse_args()
 
     documents, chunks = build_documents_and_chunks(
@@ -301,6 +358,13 @@ def main() -> None:
 
     print(f"Saved {len(documents)} documents to {docs_path}")
     print(f"Saved {len(chunks)} chunks to {chunks_path}")
+
+    if args.debug_sample_count > 0:
+        print_representative_chunks(
+            chunks,
+            sample_count=args.debug_sample_count,
+            preview_chars=args.debug_preview_chars,
+        )
 
 
 if __name__ == "__main__":
