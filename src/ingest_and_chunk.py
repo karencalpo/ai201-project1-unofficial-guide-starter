@@ -80,6 +80,32 @@ def _normalize_whitespace(text: str) -> str:
     return text.strip()
 
 
+def _remove_identifier_like_tokens(text: str) -> str:
+    token_pattern = re.compile(r"\b[A-Za-z0-9+/]{16,}={0,2}\b")
+
+    def replace_if_identifier(match: re.Match[str]) -> str:
+        token = match.group(0)
+        has_upper = any(char.isupper() for char in token)
+        has_lower = any(char.islower() for char in token)
+        has_digit = any(char.isdigit() for char in token)
+        has_base64_chars = ("+" in token) or ("/" in token) or ("=" in token)
+
+        # Heuristic: drop long, mixed-case alphanumeric tokens that look like IDs.
+        if has_upper and has_lower and has_digit and (has_base64_chars or len(token) >= 20):
+            return " "
+        return token
+
+    cleaned = token_pattern.sub(replace_if_identifier, text)
+    return _normalize_whitespace(cleaned)
+
+
+def _remove_stray_equals_artifacts(text: str) -> str:
+    text = text.replace("+ ==", " ")
+    text = text.replace("==", " ")
+    text = " ".join(text.split())
+    return text
+
+
 def _find_reviews_containers(obj: Any) -> list[dict[str, Any]]:
     reviews: list[dict[str, Any]] = []
 
@@ -178,6 +204,8 @@ def clean_course_document(raw_html: str) -> str:
     visible_text = _extract_visible_page_text(soup)
 
     combined = "\n\n".join(part for part in [structured_text, visible_text] if part)
+    combined = _remove_identifier_like_tokens(combined)
+    combined = _remove_stray_equals_artifacts(combined)
     return _normalize_whitespace(combined)
 
 
@@ -359,12 +387,13 @@ def main() -> None:
     print(f"Saved {len(documents)} documents to {docs_path}")
     print(f"Saved {len(chunks)} chunks to {chunks_path}")
 
-    if args.debug_sample_count > 0:
-        print_representative_chunks(
-            chunks,
-            sample_count=args.debug_sample_count,
-            preview_chars=args.debug_preview_chars,
-        )
+    # Debug chunk preview disabled.
+    # if args.debug_sample_count > 0:
+    #     print_representative_chunks(
+    #         chunks,
+    #         sample_count=args.debug_sample_count,
+    #         preview_chars=args.debug_preview_chars,
+    #     )
 
 
 if __name__ == "__main__":
