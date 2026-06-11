@@ -106,6 +106,106 @@ def _remove_stray_equals_artifacts(text: str) -> str:
     return text
 
 
+def _find_course_metadata(obj: Any) -> dict[str, Any]:
+    """Walk __NEXT_DATA__ JSON and extract top-level course fact fields."""
+    result: dict[str, Any] = {}
+
+    def walk(value: Any) -> None:
+        if isinstance(value, dict):
+            for key in ("creditHours", "credit_hours"):
+                if key in value and isinstance(value[key], (int, float)):
+                    result.setdefault("credit_hours", value[key])
+            for key in ("avgRating", "averageRating"):
+                if key in value and isinstance(value[key], (int, float)):
+                    result.setdefault("avg_rating", value[key])
+            for key in ("avgDifficulty", "averageDifficulty"):
+                if key in value and isinstance(value[key], (int, float)):
+                    result.setdefault("avg_difficulty", value[key])
+            for key in ("avgWorkload", "averageWorkload"):
+                if key in value and isinstance(value[key], (int, float)):
+                    result.setdefault("avg_workload", value[key])
+            for key in ("codes", "courseCode", "code"):
+                if key in value:
+                    val = value[key]
+                    if isinstance(val, list) and val:
+                        result.setdefault("course_code", str(val[0]))
+                    elif isinstance(val, str) and val:
+                        result.setdefault("course_code", val)
+            for child in value.values():
+                walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+
+    walk(obj)
+    return result
+
+
+def extract_course_facts(raw_html: str) -> dict[str, Any]:
+    """Return a dict of course fact fields extracted from the page's __NEXT_DATA__ JSON."""
+    soup = BeautifulSoup(raw_html, "html.parser")
+    next_data_script = soup.find("script", id="__NEXT_DATA__")
+    if not next_data_script or not next_data_script.string:
+        return {}
+    try:
+        payload = json.loads(next_data_script.string)
+    except json.JSONDecodeError:
+        return {}
+    return _find_course_metadata(payload)
+
+
+def extract_course_facts_from_cleaned_text(cleaned_text: str) -> dict[str, Any]:
+    """
+    Parse course facts from the beginning of cleaned page text, where OMSCentral
+    surfaces quick facts like rating, difficulty, workload, Listed As, and
+    Credit Hours.
+    """
+    header = cleaned_text[:2000]
+    facts: dict[str, Any] = {}
+
+    rating_match = re.search(r"(\d+(?:\.\d+)?)\s*/\s*5\s+rating", header, flags=re.IGNORECASE)
+    if rating_match:
+        facts["avg_rating"] = float(rating_match.group(1))
+
+    difficulty_match = re.search(
+        r"(\d+(?:\.\d+)?)\s*/\s*5\s+difficulty", header, flags=re.IGNORECASE
+    )
+    if difficulty_match:
+        facts["avg_difficulty"] = float(difficulty_match.group(1))
+
+    workload_match = re.search(r"(\d+(?:\.\d+)?)\s*hrs?\s*/\s*week", header, flags=re.IGNORECASE)
+    if workload_match:
+        facts["avg_workload"] = float(workload_match.group(1))
+
+    code_match = re.search(
+        r"Listed As\s+([A-Za-z]{2,5}-?\d{3,5})", header, flags=re.IGNORECASE
+    )
+    if code_match:
+        facts["course_code"] = code_match.group(1).upper()
+
+    credit_match = re.search(r"Credit Hours\s+(\d+)", header, flags=re.IGNORECASE)
+    if credit_match:
+        facts["credit_hours"] = int(credit_match.group(1))
+
+    return facts
+
+
+def build_course_facts_text(course: str, facts: dict[str, Any]) -> str:
+    """Format the text field for a course_facts chunk."""
+    parts = [f"Course Facts: {course}."]
+    if "course_code" in facts:
+        parts.append(f"Listed As: {facts['course_code']}.")
+    if "credit_hours" in facts:
+        parts.append(f"Credit Hours: {int(facts['credit_hours'])}.")
+    if "avg_rating" in facts:
+        parts.append(f"Average Rating: {facts['avg_rating']:.2f} / 5.")
+    if "avg_difficulty" in facts:
+        parts.append(f"Average Difficulty: {facts['avg_difficulty']:.2f} / 5.")
+    if "avg_workload" in facts:
+        parts.append(f"Average Workload: {facts['avg_workload']:.2f} hrs / week.")
+    return " ".join(parts)
+
+
 def _find_reviews_containers(obj: Any) -> list[dict[str, Any]]:
     reviews: list[dict[str, Any]] = []
 
@@ -272,11 +372,32 @@ def build_documents_and_chunks(
                     "course": source.course,
                     "source_url": source.url,
                     "chunk_id": chunk["chunk_id"],
+                    "chunk_type": "review",
                     "start_char": chunk["start_char"],
                     "end_char": chunk["end_char"],
                     "text": chunk["text"],
                 }
             )
+
+        # Append one synthetic course_facts chunk per document.
+        facts = extract_course_facts(raw_html)
+        # Fill any missing facts from the cleaned document header.
+        header_facts = extract_course_facts_from_cleaned_text(cleaned_text)
+        for key, value in header_facts.items():
+            facts.setdefault(key, value)
+        facts_text = build_course_facts_text(source.course, facts)
+        all_chunks.append(
+            {
+                "doc_id": doc_id,
+                "course": source.course,
+                "source_url": source.url,
+                "chunk_id": "facts",
+                "chunk_type": "course_facts",
+                "start_char": 0,
+                "end_char": 0,
+                "text": facts_text,
+            }
+        )
 
     return documents, all_chunks
 

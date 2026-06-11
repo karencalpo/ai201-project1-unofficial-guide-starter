@@ -42,6 +42,7 @@ My domain is courses that a Georgia Tech OMSCS student interested in Artificial 
      numbers fit the structure of your documents.
      A review-heavy corpus warrants different chunking than a long FAQ. -->
 
+
 **Chunk size:**
 500 characters
 **Overlap:**
@@ -49,6 +50,8 @@ My domain is courses that a Georgia Tech OMSCS student interested in Artificial 
 **Reasoning:**
 I set it to 500 characters to account for the character size of reviews (since this corpus is made up of student course reviews). I found that they can be as little is 180 and up to 500. I find that 
 the size of 500 makes the chunk size small enough to not include too much unrelated context from multiple reviews, but large enough to preserve the main idea of a student comment. I used an overlap of 50 characters to reduce the chance of losing meaning from chunking when breaking in the middle of a sentence.
+
+In addition to fixed-size review text chunks, I will create one synthetic `course_facts` chunk per course. This chunk stores structured course metadata such as course code, credit hours, average rating, average difficulty, and average workload. These fact chunks help the retriever answer factual and comparison questions more reliably.
 ---
 
 ## Retrieval Approach
@@ -69,6 +72,8 @@ sentence-transformers (all-MiniLM-L6-v2)
 I am using the current model above because it is lightweight, fast, and practical for this small class project. I retrieve the top 3 most similar chunks for each query. This is so the system has enough context to answer without including too much unrelated review text.
 
 If this were deployed for real users and cost is not a constraint, I'd consider using stronger embedding models with better semantic accuracy, longer context support, and stronger performance on education/course-review text. I would also consider increasing top-k or adding a reranking step so the system can retrieve more candidate chunks first and then choose the most relevant ones. The tradeoff would be better answer quality and recall versus higher latency, more compute cost, and more complexity.
+
+The vector store includes both `review_text` chunks and `course_facts` chunks. The `course_facts` chunks support factual lookup and comparison questions, while the `review_text` chunks support summary questions about student experiences.
 ---
 
 ## Evaluation Plan
@@ -80,7 +85,7 @@ If this were deployed for real users and cost is not a constraint, I'd consider 
 
 | # | Question | Expected answer |
 |---|----------|-----------------|
-| 1 | What course code and credit hours are listed for Introduction to Computer Vision? | Introduction to Computer Vision is listed as CS-6476 and has 3 credit hours. |
+| 1 | What credit hours are listed for Introduction to Computer Vision and what is it listed as? | Introduction to Computer Vision is listed as CS-6476 and has 3 credit hours. |
 | 2 | Which has the higher average workload: Artificial Intelligence or Game Artificial Intelligence? | Artificial Intelligence has the higher average workload: 22.32 hrs/week compared with Game Artificial Intelligence at 11.40 hrs/week. |
 | 3 | What textbook is listed for Natural Language Processing? | Natural Language Processing (2018) by Jacob Eisenstein. |
 | 4 | What is the average difficulty and average workload for Introduction to Graduate Algorithms? | Introduction to Graduate Algorithms has a 4.05 / 5 difficulty rating and an average workload of 19.20 hrs/week. |
@@ -97,6 +102,8 @@ If this were deployed for real users and cost is not a constraint, I'd consider 
 1. Fixed-size character chunking may split key information across important boundaries, such as the middle of a sentence, review, course description, or metadata field. The 50-character overlap helps reduce this risk, but some context could still be separated across chunks.
 
 2. Top-k 3 could potentially miss relevant context, especially if the answer is spread across several reviews or course sections. Retrieving only 3 chunks keeps responses focused, but it may leave out useful supporting information for broader summary or comparison questions.
+
+3. Because the corpus includes both `course_facts` chunks and `review_text` chunks, retrieval may sometimes return the wrong type of chunk for a question. For example, a broad student-experience question should retrieve review text, while a workload comparison question should retrieve course facts. Including a `chunk_type` metadata field can help inspect and debug retrieval results.
 
 ---
 
@@ -137,7 +144,8 @@ If this were deployed for real users and cost is not a constraint, I'd consider 
 | chunking function      |
 | Chunk size: 500 chars  |
 | Overlap: 50 chars      |
-| Output: text chunks    |
+| Output: text chunks,   |
+| course_facts chunks    |
 | with source metadata   |
 +-----------+------------+
             |
@@ -167,7 +175,8 @@ If this were deployed for real users and cost is not a constraint, I'd consider 
 | - embedding vector                |
 | - course/source name              |
 | - source URL                      |
-| - chunk text                      |
+| - chunk text                      |    
+| - chunk type                      |
 |                                   |
 | Output: searchable vector index   |
 +-----------+-----------------------+
