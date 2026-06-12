@@ -11,7 +11,7 @@ from sentence_transformers import SentenceTransformer
 
 
 DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-DEFAULT_TOP_K = 3
+DEFAULT_TOP_K = 5
 DEFAULT_COLLECTION = "omscs_course_reviews"
 
 

@@ -66,7 +66,7 @@ In addition to fixed-size review text chunks, I will create one synthetic `cours
 sentence-transformers (all-MiniLM-L6-v2)
 
 **Top-k:**
-3
+5
 
 **Production tradeoff reflection:**
 I am using the current model above because it is lightweight, fast, and practical for this small class project. I retrieve the top 3 most similar chunks for each query. This is so the system has enough context to answer without including too much unrelated review text.
@@ -101,7 +101,7 @@ The vector store includes both `review_text` chunks and `course_facts` chunks. T
 
 1. Fixed-size character chunking may split key information across important boundaries, such as the middle of a sentence, review, course description, or metadata field. The 50-character overlap helps reduce this risk, but some context could still be separated across chunks.
 
-2. Top-k 3 could potentially miss relevant context, especially if the answer is spread across several reviews or course sections. Retrieving only 3 chunks keeps responses focused, but it may leave out useful supporting information for broader summary or comparison questions.
+2. Top-k 5 could potentially miss relevant context, especially if the answer is spread across several reviews or course sections. Retrieving 5 chunks improves recall, but it may include more unrelated supporting information for narrow questions.
 
 3. Because the corpus includes both `course_facts` chunks and `review_text` chunks, retrieval may sometimes return the wrong type of chunk for a question. For example, a broad student-experience question should retrieve review text, while a workload comparison question should retrieve course facts. Including a `chunk_type` metadata field can help inspect and debug retrieval results.
 
@@ -193,7 +193,7 @@ The vector store includes both `review_text` chunks and `course_facts` chunks. T
 | - compare question vector   |
 |   to stored chunk vectors   |
 | - retrieve top-k chunks     |
-| Top-k: 3                    |
+| Top-k: 5                    |
 | Output: most relevant       |
 | course review chunks        |
 +-----------+-----------------+
@@ -235,3 +235,56 @@ The pipeline starts by loading public OMSCentral review pages for selected Georg
 **Milestone 4 — Embedding and retrieval:**
 
 **Milestone 5 — Generation and interface:**
+AI tool: GitHub Copilot (GPT-5.3-Codex)
+
+Input I will provide to the AI:
+- My Architecture section (steps 1-7).
+- Retrieval Approach section: `sentence-transformers/all-MiniLM-L6-v2`, top-k = 5.
+- Grounding requirement: answer only from retrieved chunks, never from outside knowledge.
+- Required output format: `answer` + programmatically generated `sources` list.
+- Existing code contracts in `src/embed_and_retrieve.py` (`build_vector_store`, `retrieve`, metadata fields like `course`, `source_url`, `chunk_type`).
+- Gradio skeleton requirement:
+  - `gr.Blocks()` app with title/description
+  - question textbox
+  - submit button
+  - answer output box
+  - source list output box
+
+Prompt I will give the AI for implementation:
+
+"Generate a Python file `src/generate_and_interface.py` that wires retrieval + grounded generation + Gradio UI for this OMSCS RAG project.
+
+Use these exact constraints:
+1) Retrieval stage (already implemented): import and use `build_vector_store(...)` and `retrieve(...)` from `src/embed_and_retrieve.py`.
+2) Embedding model: `sentence-transformers/all-MiniLM-L6-v2`.
+3) Retrieval: top-k = 5.
+4) Generation model: Groq chat completion with `llama-3.3-70b-versatile`.
+5) Grounding must be enforced (hard requirement):
+     - System prompt must instruct the model to answer ONLY from provided retrieved snippets.
+     - If snippets are insufficient, return a refusal like: `I don't have enough information in the retrieved OMSCentral context to answer that.`
+     - Do not allow unsupported claims.
+6) Source attribution must be programmatically guaranteed:
+     - Build the source list in Python from retrieved metadata (`course`, `source_url`, `chunk_type`, `rank`).
+     - Do not rely on the LLM to invent or format citations.
+     - UI should always display sources from retrieval output, even if the answer is a refusal.
+7) Output format shown to user:
+     - `Answer` section (LLM output)
+     - `Sources` section (deterministic list from Python)
+8) Gradio interface skeleton:
+     - Blocks app
+     - Question textbox
+     - Submit button
+     - Answer output component
+     - Sources output component
+     - Optional debug context component
+9) Include CLI args for `--persist-dir`, `--collection`, `--model`, `--top-k`, `--host`, `--port`, and `--share`.
+10) Read API key from `GROQ_API_KEY` env var and handle missing key with a clear runtime error.
+
+Return complete runnable code only."
+
+How I will verify output matches spec before running:
+- Confirm the system prompt uses mandatory language ("only", "must", refusal condition) and not soft wording.
+- Confirm source list is assembled in Python from retrieved metadata, then rendered separately from answer text.
+- Confirm top-k default is 5 and retrieval uses `all-MiniLM-L6-v2`.
+- Confirm Gradio includes question input, answer output, and source output.
+- Confirm the Groq call receives only the user question + retrieved snippets as context.
