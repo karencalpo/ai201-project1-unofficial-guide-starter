@@ -265,7 +265,7 @@ Add a path in the deterministic logic that allows a comparison path to recognize
 The diagram in the architecture section helped me better imagine the steps in the RAG pipeline.
 
 **One way your implementation diverged from the spec, and why:**
-I do not mention that I changed the similirity used by the vector index to compare embeddings from Euclidean distance (L2) to cosine similarity. I did that to improve the distance numbers for the chunks I was getting from top-k.
+I do not mention that I changed the similarity used by the vector index to compare embeddings from Euclidean distance (L2) to cosine similarity. I did that to improve the distance numbers for the chunks I was getting from top-k.
 ---
 
 ## AI Usage
