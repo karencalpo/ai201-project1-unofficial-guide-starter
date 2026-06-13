@@ -66,7 +66,7 @@ In addition to fixed-size review text chunks, I will create one synthetic `cours
 sentence-transformers (all-MiniLM-L6-v2)
 
 **Top-k:**
-5
+8
 
 **Production tradeoff reflection:**
 I am using the current model above because it is lightweight, fast, and practical for this small class project. I retrieve the top 3 most similar chunks for each query. This is so the system has enough context to answer without including too much unrelated review text.
@@ -86,10 +86,10 @@ The vector store includes both `review_text` chunks and `course_facts` chunks. T
 | # | Question | Expected answer |
 |---|----------|-----------------|
 | 1 | What credit hours are listed for Introduction to Computer Vision and what is it listed as? | Introduction to Computer Vision is listed as CS-6476 and has 3 credit hours. |
-| 2 | Which has the higher average workload: Artificial Intelligence or Game Artificial Intelligence? | Artificial Intelligence has the higher average workload: 22.32 hrs/week compared with Game Artificial Intelligence at 11.40 hrs/week. |
+| 2 |According to recent student review content, what is one common warning about Human-Computer Interaction? | Students warn that HCI involves a lot of reading and writing, can include busy work, and may have uneven workload across phases, so it should not be treated as a low-effort class. | One common warning is that it involves substantial reading and writing, and the workload can feel uneven across phases, so the course should not be treated as low-effort. |
 | 3 | What textbook is listed for Natural Language Processing? | Natural Language Processing (2018) by Jacob Eisenstein. |
 | 4 | What is the average difficulty and average workload for Introduction to Graduate Algorithms? | Introduction to Graduate Algorithms has a 4.05 / 5 difficulty rating and an average workload of 19.20 hrs/week. |
-| 5 | According to recent student review content, what is one common warning about Human-Computer Interaction? | Students warn that HCI involves a lot of reading and writing, can include busy work, and may have uneven workload across phases, so it should not be treated as a low-effort class. |
+| 5 | Is Introduction to Graduate Algorithms or AI, Ethics, and Society harder? | Introduction to Graduate Algorithms is the harder course at 4.05 / 5 difficulty |
 
 ---
 
@@ -231,8 +231,95 @@ The pipeline starts by loading public OMSCentral review pages for selected Georg
      with my specified chunk size and overlap" is a plan. -->
 
 **Milestone 3 — Ingestion and chunking:**
+AI tool: GitHub Copilot (GPT-5.3-Codex)
+
+Input I will provide to the AI:
+- My Domain and Documents sections (all 10 OMSCentral source URLs and domain scope).
+- My Chunking Strategy section (500-character chunks, 50-character overlap).
+- Architecture steps 1-3 (ingestion, cleaning/preprocessing, chunking).
+- Required output artifact: `data/documents.jsonl` with one document object per source page.
+- Required output artifact: `data/chunks.jsonl` including both `review_text` chunks and one `course_facts` chunk per course.
+- Required metadata fields per chunk: `id`, `course`, `source_url`, `chunk_type`, `chunk_index`, `text`.
+
+Prompt I will give the AI for implementation:
+
+"Generate a Python file `src/ingest_and_chunk.py` for my OMSCS course-review RAG project.
+
+Use these exact constraints:
+1) Ingestion:
+     - Read a fixed list of 10 OMSCentral URLs defined in code.
+     - Fetch each page and extract useful course/review text.
+     - Save cleaned document records to `data/documents.jsonl`.
+2) Cleaning:
+     - Normalize whitespace and remove obvious navigation/UI boilerplate where possible.
+     - Preserve meaningful review/course content.
+3) Chunking:
+     - Implement fixed-size character chunking with `chunk_size=500` and `overlap=50`.
+     - Produce `review_text` chunks from cleaned page text.
+4) Structured facts:
+     - Create one synthetic `course_facts` chunk per course with available structured metadata
+       (course code, credit hours, average rating, average difficulty, average workload, textbook if found).
+5) Output format:
+     - Write `data/chunks.jsonl`.
+     - Every chunk must include metadata: `id`, `course`, `source_url`, `chunk_type`, `chunk_index`, `text`.
+6) CLI:
+     - Include args for output file paths and chunking params.
+7) Reliability:
+     - Handle request failures with clear logs and continue processing remaining URLs.
+
+Return complete runnable code only."
+
+How I will verify output matches spec before running:
+- Confirm chunking defaults are exactly 500 size and 50 overlap.
+- Confirm both artifact files are produced: `data/documents.jsonl` and `data/chunks.jsonl`.
+- Confirm `course_facts` chunks are generated once per course and are tagged with `chunk_type="course_facts"`.
+- Confirm review chunks are tagged with `chunk_type="review_text"`.
+- Confirm each chunk includes the required metadata fields and source attribution.
 
 **Milestone 4 — Embedding and retrieval:**
+AI tool: GitHub Copilot (GPT-5.3-Codex)
+
+Input I will provide to the AI:
+- My Retrieval Approach section: embedding model `sentence-transformers/all-MiniLM-L6-v2`, top-k = 5.
+- Architecture steps 4-6 (embeddings, vector store, retrieval).
+- `data/chunks.jsonl` schema from Milestone 3 (`text` + metadata fields).
+- Chroma requirement: local persistent store under `data/chroma/`.
+- Required functions and contract:
+  - `build_vector_store(chunks_path, persist_dir, collection_name, model_name)`
+  - `retrieve(query, persist_dir, collection_name, model_name, top_k)`
+
+Prompt I will give the AI for implementation:
+
+"Generate a Python file `src/embed_and_retrieve.py` for my OMSCS RAG project.
+
+Use these exact constraints:
+1) Embeddings:
+     - Use sentence-transformers model `all-MiniLM-L6-v2`.
+     - Embed chunk text from `data/chunks.jsonl`.
+2) Vector store:
+     - Use ChromaDB with local persistence (`data/chroma/` by default).
+     - Store vectors plus metadata fields (`course`, `source_url`, `chunk_type`, `chunk_index`, `id`).
+3) Build function:
+     - Implement `build_vector_store(...)` to create/reset collection and ingest all chunks.
+4) Retrieval function:
+     - Implement `retrieve(...)` that embeds a query and returns top-k most similar chunks.
+     - Default top-k must be 5.
+     - Return deterministic rank ordering and include distance/similarity info when available.
+5) Return schema:
+     - Return a list of records containing at minimum `text`, `course`, `source_url`, `chunk_type`, `rank`.
+6) CLI:
+     - Include options to build index and run a sample retrieval from terminal.
+7) Robustness:
+     - Validate missing files/empty inputs with clear errors.
+
+Return complete runnable code only."
+
+How I will verify output matches spec before running:
+- Confirm model name is exactly `all-MiniLM-L6-v2`.
+- Confirm Chroma persistence path defaults to `data/chroma/`.
+- Confirm `retrieve(...)` default `top_k` is 5 and returned results are rank-ordered.
+- Confirm returned retrieval objects include both text and source metadata.
+- Confirm both `review_text` and `course_facts` chunks can be embedded and retrieved.
 
 **Milestone 5 — Generation and interface:**
 AI tool: GitHub Copilot (GPT-5.3-Codex)

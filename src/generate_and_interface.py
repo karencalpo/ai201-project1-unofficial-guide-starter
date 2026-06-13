@@ -324,13 +324,12 @@ def _format_retrieval_context(matches: list[dict[str, Any]]) -> str:
     lines: list[str] = []
     for match in matches:
         metadata = match.get("metadata", {})
-        rank = int(match.get("rank", -1))
         course = str(metadata.get("course", "Unknown course"))
         chunk_type = str(metadata.get("chunk_type", "unknown"))
         source_url = str(metadata.get("source_url", ""))
         text = str(match.get("text", "")).strip()
 
-        lines.append(f"[S{rank}] course={course}; chunk_type={chunk_type}; source_url={source_url}")
+        lines.append(f"course={course}; chunk_type={chunk_type}; source_url={source_url}")
         lines.append(text)
         lines.append("")
 
@@ -339,16 +338,20 @@ def _format_retrieval_context(matches: list[dict[str, Any]]) -> str:
 
 def _build_source_items(matches: list[dict[str, Any]]) -> list[SourceItem]:
     items: list[SourceItem] = []
+    seen: set[tuple[str, str, str]] = set()
     for match in matches:
         metadata = match.get("metadata", {})
-        items.append(
-            SourceItem(
-                rank=int(match.get("rank", -1)),
-                course=str(metadata.get("course", "Unknown course")),
-                chunk_type=str(metadata.get("chunk_type", "unknown")),
-                source_url=str(metadata.get("source_url", "")),
-            )
+        source_item = SourceItem(
+            rank=int(match.get("rank", -1)),
+            course=str(metadata.get("course", "Unknown course")),
+            chunk_type=str(metadata.get("chunk_type", "unknown")),
+            source_url=str(metadata.get("source_url", "")),
         )
+        dedupe_key = (source_item.course, source_item.chunk_type, source_item.source_url)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        items.append(source_item)
     return items
 
 
@@ -357,7 +360,7 @@ def _format_sources_markdown(sources: list[SourceItem]) -> str:
         return "No sources were retrieved."
 
     lines = [
-        f"{index}. [S{src.rank}] {src.course} | {src.chunk_type} | {src.source_url}"
+        f"{index}. {src.course} | {src.chunk_type} | {src.source_url}"
         for index, src in enumerate(sources, start=1)
     ]
     return "\n".join(lines)
@@ -413,17 +416,16 @@ def build_qa_fn(
         rebuild=False,
     )
 
-    def qa(question: str) -> tuple[str, str, str]:
+    def qa(question: str) -> tuple[str, str]:
         question = (question or "").strip()
         if not question:
-            return "Please enter a question.", "No sources were retrieved.", ""
+            return "Please enter a question.", "No sources were retrieved."
 
         api_key = os.getenv("GROQ_API_KEY", "").strip()
         if not api_key:
             return (
                 "Missing GROQ_API_KEY. Set it in your environment before asking questions.",
                 "No sources were retrieved.",
-                "",
             )
 
         candidate_k = max(top_k * 5, 25)
@@ -453,7 +455,8 @@ def build_qa_fn(
                 comp_answer, comp_sources = result
                 sources_md = _format_sources_markdown(_build_source_items(comp_sources))
                 debug_context = _format_retrieval_context(comp_sources)
-                return comp_answer, sources_md, debug_context
+                print("\n[DEBUG CONTEXT]\n" + debug_context + "\n")
+                return comp_answer, sources_md
 
         # Pattern questions benefit from broader same-course review evidence.
         answer_matches = matches
@@ -488,16 +491,17 @@ def build_qa_fn(
             )
 
         debug_context = _format_retrieval_context(answer_matches)
-        return answer, sources_md, debug_context
+        print("\n[DEBUG CONTEXT]\n" + debug_context + "\n")
+        return answer, sources_md
 
     return qa
 
 
 def build_app(qa_fn):
-    with gr.Blocks(title="OMSCS Unofficial Guide - Grounded QA") as app:
-        gr.Markdown("# OMSCS Unofficial Guide - Grounded QA")
+    with gr.Blocks(title="Georgia Tech OMSCS Unofficial Guide - AI Emphasis") as app:
+        gr.Markdown("# Georgia Tech OMSCS Unofficial Guide - AI Emphasis")
         gr.Markdown(
-            "Ask a question about the ingested OMSCentral reviews. "
+            "Ask a question about the ingested OMSCentral reviews for AI classes. "
             "Answers are generated only from retrieved context."
         )
 
@@ -510,12 +514,11 @@ def build_app(qa_fn):
 
         answer_box = gr.Textbox(label="Answer", lines=8)
         sources_box = gr.Markdown(label="Sources")
-        debug_box = gr.Textbox(label="Retrieved Context (Debug)", lines=12)
 
         submit_btn.click(
             fn=qa_fn,
             inputs=[question_box],
-            outputs=[answer_box, sources_box, debug_box],
+            outputs=[answer_box, sources_box],
         )
 
     return app
